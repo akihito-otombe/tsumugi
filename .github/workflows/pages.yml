@@ -1,10 +1,8 @@
-name: Deploy versioned to GitHub Pages
+name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]        # mainにpush → /preview/ を更新
-    tags:
-      - 'v*'                  # v1 / v2 / v1.0.0 などのタグ → /vX/ と /latest/ を更新
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -17,59 +15,24 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  REPO_NAME: tsumugi.io       # ← リポジトリ名（フォルダ名になる）
-  NODE_VERSION: 20
+  # リポジトリ名（例: tsumugi.io）。リネームしても自動で追随。
+  REPO_NAME: ${{ github.event.repository.name }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-
+          node-version: 20
+          cache: npm
       - run: npm ci || npm i
-
-      # 参照の種類でバージョン文字列を決定（タグなら vX / それ以外は preview）
-      - name: Resolve version
-        id: ver
-        run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            echo "version=$GITHUB_REF_NAME" >> $GITHUB_OUTPUT
-          else
-            echo "version=preview" >> $GITHUB_OUTPUT
-          fi
-
-      # ① 基本ビルド（/REPO_NAME/<version>/ 配下に配置）
-      - name: Build for version path
-        run: |
-          npx vite build --base "/${{ env.REPO_NAME }}/${{ steps.ver.outputs.version }}/"
-          mkdir -p out/${{ steps.ver.outputs.version }}
-          mv dist/* out/${{ steps.ver.outputs.version }}/
-
-      # ② タグ時は latest/ も作る（常に最新を指す固定URL）
-      - name: Build for latest (tag only)
-        if: ${{ github.ref_type == 'tag' }}
-        run: |
-          npx vite build --base "/${{ env.REPO_NAME }}/latest/"
-          mkdir -p out/latest
-          mv dist/* out/latest/
-
-      # ③ SPA 直リンク対策（/foo 刷新時404を避ける）：index.htmlを404.htmlとして複製
-      - name: Add SPA 404 fallbacks
-        run: |
-          for d in out/*; do
-            if [ -d "$d" ] && [ -f "$d/index.html" ]; then
-              cp "$d/index.html" "$d/404.html"
-            fi
-          done
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      # ここで base を /<repo>/ に固定（URL直下の404を防止）
+      - run: npm run build -- --base=/${{ env.REPO_NAME }}/
+      - uses: actions/upload-pages-artifact@v3
         with:
-          path: out
+          path: dist
 
   deploy:
     needs: build
